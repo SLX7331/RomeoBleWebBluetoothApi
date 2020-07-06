@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html>
+   <head>
+      <meta charset="utf-8">
+	  <title>Romeo BLE - Web Bluetooth API</title>
+      <script type="text/javascript">
+	  
+         const serviceUuid = 0xdfb0;
+         const serialCharacteristicUuid = 0xdfb1;
+         const commandCharacteristicUuid = 0xdfb2;
+         
+         /* Bluetooth detection */
+         
+         (async () => {
+           try {
+             const isBluetoothAvailable = await navigator.bluetooth.getAvailability();
+             console.log(`> Bluetooth is ${isBluetoothAvailable ? 'available' : 'unavailable'}`);
+           } catch(error) {
+             console.log('Argh! ' + error);
+           }
+         })();
+         
+         if ('onavailabilitychanged' in navigator.bluetooth) {
+           navigator.bluetooth.addEventListener('availabilitychanged', function(event) {
+             console.log(`> Bluetooth is ${event.value ? 'available' : 'unavailable'}`);
+           });
+         }
+         
+         /* Connection */
+         	
+         var bluetoothDevice;
+         var service;
+         
+         async function onConnectButtonClick() {
+           bluetoothDevice = null;
+           try {
+             console.log('Requesting any Bluetooth Device...');
+         	bluetoothDevice = await navigator.bluetooth.requestDevice({
+               filters: [{services: [serviceUuid]}]});
+             bluetoothDevice.addEventListener('gattserverdisconnected', onDisconnected);
+             connect();
+           } catch(error) {
+             console.log('Argh! ' + error);
+           }
+         }
+         
+         async function connect() {
+           exponentialBackoff(3 /* max retries */, 2 /* seconds delay */,
+             async function toTry() {
+         		time('Connecting to Bluetooth Device... ');
+         		const server = await bluetoothDevice.gatt.connect();
+         		service = await server.getPrimaryService(serviceUuid);
+         		var commandCharacteristic = await service.getCharacteristic(commandCharacteristicUuid);
+         		let encoder = new TextEncoder('utf-8');
+         		await commandCharacteristic.writeValue(encoder.encode('AT+PASSWOR=DFRobot\r\n'));
+         		await commandCharacteristic.writeValue(encoder.encode('AT+CURRUART=115200\r\n'));
+             },
+             function success() {
+               console.log('> Bluetooth Device connected.');
+             },
+             function fail() {
+               time('Failed to reconnect.');
+             });
+         }
+         
+         function onDisconnected() {
+           console.log('> Bluetooth Device disconnected');
+           connect();
+         }
+         
+         /* Serial commands */
+         
+         async function onSendButtonClick() {
+         
+           try {
+         
+         	let command = document.querySelector('#commandText').value + '\r\n';
+            const serialCharacteristic = await service.getCharacteristic(serialCharacteristicUuid);
+         	
+         	let encoder = new TextEncoder('utf-8');
+         	await serialCharacteristic.writeValue(encoder.encode(command));
+         
+           } catch(error) {
+             console.log('Argh! ' + error);
+           }
+         }
+         
+         /* Utils */
+         
+         // This function keeps calling "toTry" until promise resolves or has
+         // retried "max" number of times. First retry has a delay of "delay" seconds.
+         // "success" is called upon success.
+         async function exponentialBackoff(max, delay, toTry, success, fail) {
+           try {
+             const result = await toTry();
+             success(result);
+           } catch(error) {
+             if (max === 0) {
+               return fail();
+             }
+             time('Retrying in ' + delay + 's... (' + max + ' tries left)');
+             setTimeout(function() {
+               exponentialBackoff(--max, delay * 2, toTry, success, fail);
+             }, delay * 1000);
+           }
+         }
+         
+         function time(text) {
+           console.log('[' + new Date().toJSON().substr(11, 8) + '] ' + text);
+         }
+
+      </script>
+   </head>
+   <body>
+      <button onClick="onConnectButtonClick()">CONNECT</button>
+      <br>
+      <input id="commandText" type="text" placeholder="Command">
+      <button onClick="onSendButtonClick()">SEND</button>
+   </body>
+</html>
